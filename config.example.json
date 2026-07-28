@@ -1,0 +1,15 @@
+{
+  "schema_version": 2,
+  "overlay_enabled": false,
+  "mouse_speed": 500,
+  "auto_shutdown": "none",
+  "unlimited_mode": false,
+  "schedule_mode": "immediate",
+  "start_at": "",
+  "end_at": "",
+  "duration_seconds": 3600,
+  "selected_heroes": ["D.Va"],
+  "hero_ratios": {"D.Va": 100},
+  "tariff_tier": 1,
+  "custom_tariff": "0.52"
+}

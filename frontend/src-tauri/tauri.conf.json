@@ -1,0 +1,39 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "HeroFlow Desktop",
+  "version": "2.0.0",
+  "identifier": "app.heroflow.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "HeroFlow Desktop",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 1180,
+        "minHeight": 760,
+        "decorations": false,
+        "center": true
+      }
+    ],
+    "security": { "csp": null }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "nsis",
+    "icon": ["../../icon/icon.ico"],
+    "externalBin": ["binaries/backend", "binaries/overlay"],
+    "resources": {
+      "../public/heroes": "heroes"
+    },
+    "shortDescription": "Windows hero automation and telemetry console",
+    "longDescription": "HeroFlow Desktop combines hero rotation, scheduled automation, power telemetry, overlay diagnostics and input-driver management in one Windows desktop console."
+  },
+  "plugins": {
+    "shell": { "open": true }
+  }
+}

@@ -1,0 +1,2 @@
+# Runtime dependencies are already bundled by the Windows build.
+# Keep this file for build-time verification only.

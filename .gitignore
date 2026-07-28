@@ -1,0 +1,36 @@
+# Local environments and editor state
+.venv/
+.trae/
+.agents/
+.codex/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+
+# Runtime state
+config.json
+.heroflow/
+.tariff_cache.json
+.bootstrap_done
+logs/
+frontend/logs/
+
+# Generated assets and packages
+frontend/node_modules/
+frontend/dist/
+frontend/public/fonts/
+frontend/public/heroes/
+frontend/src-tauri/target/
+frontend/src-tauri/binaries/*.exe
+build/
+dist/
+HeroFlow Desktop/
+*.tsbuildinfo
+*.spec
+
+# Local-only material
+别看这个文件夹/
+
+# OS files
+Thumbs.db
+.DS_Store

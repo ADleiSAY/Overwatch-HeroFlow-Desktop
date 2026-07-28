@@ -1,0 +1,16 @@
+# Overwatch Hero - 脚本化刷取控制台
+# 完整依赖清单（首次启动会自动安装）
+
+# ===== 必需依赖（缺失会阻止程序启动）=====
+PyQt5>=5.15                    # GUI 框架
+PyQtChart>=5.15                # 功耗实时曲线图表
+opencv-python>=4.5             # 图像识别（模板匹配）
+numpy>=1.20                    # 数值计算（OpenCV 依赖）
+dxcam>=0.3                     # 高性能屏幕捕获（DXGI）
+pywin32>=300                   # Windows API（win32gui/win32api/win32con）
+psutil>=5.8                    # 系统监控（降级估算功耗用）
+requests>=2.25                 # HTTP 请求（IP 定位 + 电价查询）
+
+# ===== 可选依赖（增强功能，缺失时降级运行）=====
+pythonnet>=3.0                 # 调用 LibreHardwareMonitorLib.dll（精确功耗监控）
+interception>=1.0              # Interception 驱动 Python 绑定（驱动级输入）
