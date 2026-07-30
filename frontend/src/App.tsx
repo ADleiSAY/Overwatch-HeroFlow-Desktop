@@ -85,6 +85,7 @@ export function App() {
         setStartupProgress(Math.max(4, Math.min(96, Number(status.progress || 0))));
         setStartupMessage(status.message || "正在等待 HeroFlow Core");
         if (status.error) throw new Error(status.error);
+        if (status.power_request_warning) setNotice(status.power_request_warning);
         if (status.available && status.ready) return;
         await new Promise((resolve) => window.setTimeout(resolve, 250));
       }

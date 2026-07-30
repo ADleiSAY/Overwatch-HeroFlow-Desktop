@@ -19,12 +19,21 @@ export type BackendStatus = {
   message?: string;
   progress?: number;
   error?: string;
+  system_awake?: boolean;
+  power_request_warning?: string;
 };
 
 export async function backendStatus(): Promise<BackendStatus> {
   return isTauriRuntime
     ? invoke("backend_status")
-    : { available: true, ready: true, phase: "ready", message: "浏览器预览已就绪", progress: 100 };
+    : {
+      available: true,
+      ready: true,
+      phase: "ready",
+      message: "浏览器预览已就绪",
+      progress: 100,
+      system_awake: true,
+    };
 }
 
 export async function connectBackend(): Promise<() => void> {

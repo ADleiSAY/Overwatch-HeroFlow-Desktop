@@ -12,12 +12,132 @@ use tauri::{Emitter, Manager};
 use std::os::windows::process::CommandExt;
 
 #[cfg(target_os = "windows")]
+use windows_sys::Win32::{
+    Foundation::{CloseHandle, GetLastError, HANDLE, INVALID_HANDLE_VALUE},
+    System::{
+        Power::{
+            PowerClearRequest, PowerCreateRequest, PowerSetRequest,
+            PowerRequestSystemRequired,
+        },
+        Threading::{
+            REASON_CONTEXT, REASON_CONTEXT_0, POWER_REQUEST_CONTEXT_SIMPLE_STRING,
+        },
+    },
+};
+
+#[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+#[cfg(target_os = "windows")]
+const POWER_REQUEST_REASON: &str =
+    "HeroFlow 正在运行，需要保持电脑唤醒以继续预约和自动化任务";
+
+#[cfg(target_os = "windows")]
+trait PowerRequestApi {
+    fn create(&self, context: *const REASON_CONTEXT) -> HANDLE;
+    fn set_system_required(&self, handle: HANDLE) -> bool;
+    fn clear_system_required(&self, handle: HANDLE);
+    fn close(&self, handle: HANDLE);
+    fn last_error(&self) -> u32;
+}
+
+#[cfg(target_os = "windows")]
+struct WindowsPowerRequestApi;
+
+#[cfg(target_os = "windows")]
+impl PowerRequestApi for WindowsPowerRequestApi {
+    fn create(&self, context: *const REASON_CONTEXT) -> HANDLE {
+        unsafe { PowerCreateRequest(context) }
+    }
+
+    fn set_system_required(&self, handle: HANDLE) -> bool {
+        unsafe { PowerSetRequest(handle, PowerRequestSystemRequired) != 0 }
+    }
+
+    fn clear_system_required(&self, handle: HANDLE) {
+        unsafe {
+            PowerClearRequest(handle, PowerRequestSystemRequired);
+        }
+    }
+
+    fn close(&self, handle: HANDLE) {
+        unsafe {
+            CloseHandle(handle);
+        }
+    }
+
+    fn last_error(&self) -> u32 {
+        unsafe { GetLastError() }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn power_error(operation: &str, code: u32) -> String {
+    format!(
+        "{operation}失败：{}（Windows 错误 {code}）",
+        std::io::Error::from_raw_os_error(code as i32)
+    )
+}
+
+#[cfg(target_os = "windows")]
+fn acquire_power_request(api: &impl PowerRequestApi) -> Result<isize, String> {
+    let mut reason: Vec<u16> = POWER_REQUEST_REASON
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let context = REASON_CONTEXT {
+        Version: 0,
+        Flags: POWER_REQUEST_CONTEXT_SIMPLE_STRING,
+        Reason: REASON_CONTEXT_0 {
+            SimpleReasonString: reason.as_mut_ptr(),
+        },
+    };
+    let handle = api.create(&context);
+    if handle == INVALID_HANDLE_VALUE {
+        return Err(power_error("创建系统唤醒请求", api.last_error()));
+    }
+    if !api.set_system_required(handle) {
+        let error = power_error("启用系统唤醒请求", api.last_error());
+        api.close(handle);
+        return Err(error);
+    }
+    Ok(handle as isize)
+}
+
+#[cfg(target_os = "windows")]
+fn release_power_request(api: &impl PowerRequestApi, handle: isize) {
+    let handle = handle as HANDLE;
+    api.clear_system_required(handle);
+    api.close(handle);
+}
+
+#[cfg(target_os = "windows")]
+struct SystemSleepBlocker {
+    handle: isize,
+}
+
+#[cfg(target_os = "windows")]
+impl SystemSleepBlocker {
+    fn acquire() -> Result<Self, String> {
+        acquire_power_request(&WindowsPowerRequestApi).map(|handle| Self { handle })
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for SystemSleepBlocker {
+    fn drop(&mut self) {
+        release_power_request(&WindowsPowerRequestApi, self.handle);
+    }
+}
 
 struct Backend {
     child: Arc<Mutex<Option<Child>>>,
     startup_error: Arc<Mutex<Option<String>>>,
     startup_status: Arc<Mutex<StartupStatus>>,
+    system_awake: bool,
+    power_request_warning: Option<String>,
+    #[cfg(target_os = "windows")]
+    _system_sleep_blocker: Option<SystemSleepBlocker>,
 }
 
 struct StartupStatus {
@@ -101,7 +221,9 @@ fn backend_status(state: tauri::State<'_, Backend>) -> serde_json::Value {
         "phase": status.as_ref().map(|value| value.phase.clone()).unwrap_or_else(|| "unknown".to_string()),
         "message": status.as_ref().map(|value| value.message.clone()).unwrap_or_else(|| "正在读取启动状态".to_string()),
         "progress": status.as_ref().map(|value| value.progress).unwrap_or(0),
-        "error": error
+        "error": error,
+        "system_awake": state.system_awake,
+        "power_request_warning": state.power_request_warning.clone()
     })
 }
 
@@ -182,6 +304,25 @@ fn main() {
             let status_state = Arc::new(Mutex::new(StartupStatus::launching()));
             let diagnostic_path = app_data_dir.join("backend-startup.log");
             let _ = std::fs::write(&diagnostic_path, "HeroFlow Core startup\n");
+
+            #[cfg(target_os = "windows")]
+            let (system_sleep_blocker, system_awake, power_request_warning) =
+                match SystemSleepBlocker::acquire() {
+                    Ok(blocker) => {
+                        append_diagnostic(
+                            &diagnostic_path,
+                            "power_request=PowerRequestSystemRequired",
+                        );
+                        (Some(blocker), true, None)
+                    }
+                    Err(error) => {
+                        let warning = format!("无法阻止电脑自动睡眠：{error}");
+                        append_diagnostic(&diagnostic_path, &format!("power_request_error={warning}"));
+                        (None, false, Some(warning))
+                    }
+                };
+            #[cfg(not(target_os = "windows"))]
+            let (system_awake, power_request_warning) = (false, None);
 
             let launch_result = resolve_executable(&resource_dir, &current_dir, "backend")
                 .and_then(|backend_path| {
@@ -290,6 +431,10 @@ fn main() {
                 child: child_state,
                 startup_error: error_state,
                 startup_status: status_state,
+                system_awake,
+                power_request_warning,
+                #[cfg(target_os = "windows")]
+                _system_sleep_blocker: system_sleep_blocker,
             });
             Ok(())
         })
@@ -321,4 +466,85 @@ fn main() {
             }
         }
     });
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+
+    struct MockPowerRequestApi {
+        create_handle: isize,
+        set_succeeds: bool,
+        error_code: u32,
+        clear_calls: Cell<usize>,
+        close_calls: Cell<usize>,
+    }
+
+    impl MockPowerRequestApi {
+        fn new(create_handle: isize, set_succeeds: bool) -> Self {
+            Self {
+                create_handle,
+                set_succeeds,
+                error_code: 5,
+                clear_calls: Cell::new(0),
+                close_calls: Cell::new(0),
+            }
+        }
+    }
+
+    impl PowerRequestApi for MockPowerRequestApi {
+        fn create(&self, _context: *const REASON_CONTEXT) -> HANDLE {
+            self.create_handle as HANDLE
+        }
+
+        fn set_system_required(&self, _handle: HANDLE) -> bool {
+            self.set_succeeds
+        }
+
+        fn clear_system_required(&self, _handle: HANDLE) {
+            self.clear_calls.set(self.clear_calls.get() + 1);
+        }
+
+        fn close(&self, _handle: HANDLE) {
+            self.close_calls.set(self.close_calls.get() + 1);
+        }
+
+        fn last_error(&self) -> u32 {
+            self.error_code
+        }
+    }
+
+    #[test]
+    fn invalid_power_request_handle_is_not_closed() {
+        let api = MockPowerRequestApi::new(INVALID_HANDLE_VALUE as isize, false);
+
+        let error = acquire_power_request(&api).expect_err("invalid handle must fail");
+
+        assert!(error.contains("Windows 错误 5"));
+        assert_eq!(api.clear_calls.get(), 0);
+        assert_eq!(api.close_calls.get(), 0);
+    }
+
+    #[test]
+    fn failed_system_requirement_closes_created_handle() {
+        let api = MockPowerRequestApi::new(42, false);
+
+        let error = acquire_power_request(&api).expect_err("set request must fail");
+
+        assert!(error.contains("Windows 错误 5"));
+        assert_eq!(api.clear_calls.get(), 0);
+        assert_eq!(api.close_calls.get(), 1);
+    }
+
+    #[test]
+    fn release_clears_request_before_closing_handle() {
+        let api = MockPowerRequestApi::new(42, true);
+        let handle = acquire_power_request(&api).expect("request should succeed");
+
+        release_power_request(&api, handle);
+
+        assert_eq!(api.clear_calls.get(), 1);
+        assert_eq!(api.close_calls.get(), 1);
+    }
 }
